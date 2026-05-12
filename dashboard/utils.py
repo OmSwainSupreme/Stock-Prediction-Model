@@ -33,6 +33,8 @@ def add_technical_indicators(df):
     df.dropna(inplace=True)
     return df
 
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+
 def train_and_predict(df):
     """Train the model on historical data and predict the next day trend."""
     # Define features and target
@@ -42,7 +44,6 @@ def train_and_predict(df):
     df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
     
     # Use data up to the second to last row for training/testing
-    # The last row's target is NaN because we don't know "tomorrow" yet
     model_df = df.dropna().copy()
     
     X = model_df[features]
@@ -55,13 +56,16 @@ def train_and_predict(df):
     model = RandomForestClassifier(n_estimators=100, min_samples_split=50, random_state=42)
     model.fit(X_train, y_train)
     
-    # Get latest data for prediction (the very last row in our original df)
+    # Get latest data for prediction
     latest_features = df[features].iloc[[-1]]
     prediction = model.predict(latest_features)[0]
     confidence = model.predict_proba(latest_features)[0]
     
-    # Calculate accuracy on test set
-    accuracy = model.score(X_test, y_test)
+    # Calculate evaluation metrics on test set
+    preds = model.predict(X_test)
+    accuracy = accuracy_score(y_test, preds)
+    precision = precision_score(y_test, preds, zero_division=0)
+    recall = recall_score(y_test, preds, zero_division=0)
     
     # Feature Importance
     importance = pd.Series(model.feature_importances_, index=features).sort_values(ascending=False)
@@ -71,6 +75,8 @@ def train_and_predict(df):
         'prediction': prediction,
         'confidence': confidence,
         'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
         'feature_importance': importance,
         'test_size': len(X_test)
     }

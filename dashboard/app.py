@@ -71,6 +71,18 @@ st.sidebar.info("This project is for educational purposes only and is not financ
 st.title("📈 Stock Market Trend Analytics")
 st.markdown(f"Exploring trends and predictions for **{ticker}**")
 
+# Initialize session state for prediction results and tracking inputs
+if 'prediction_results' not in st.session_state:
+    st.session_state.prediction_results = None
+if 'last_run_params' not in st.session_state:
+    st.session_state.last_run_params = None
+
+# Check if parameters have changed to reset results
+current_params = f"{ticker}_{date_range}"
+if st.session_state.last_run_params != current_params:
+    st.session_state.prediction_results = None
+    st.session_state.last_run_params = current_params
+
 # Load and process data
 with st.spinner("Fetching market data..."):
     raw_data = fetch_data(ticker, date_range[0], date_range[1])
@@ -79,6 +91,11 @@ with st.spinner("Fetching market data..."):
 if data.empty:
     st.error("Not enough data found for this period. Please try a longer date range.")
 else:
+    # --- PREDICTION LOGIC (Moved up to update KPIs) ---
+    if predict_btn:
+        with st.spinner("Training Model..."):
+            st.session_state.prediction_results = train_and_predict(data)
+
     # --- TOP SECTION: KPI CARDS ---
     col1, col2, col3, col4 = st.columns(4)
     
@@ -89,13 +106,27 @@ else:
     with col1:
         st.metric("Current Price", f"${current_price:.2f}", f"{price_diff:.2f}")
     
-    # Placeholder for model results (will be updated if button clicked)
+    results = st.session_state.prediction_results
+    
     with col2:
-        st.metric("Predicted Trend", "---")
+        if results:
+            trend = "UP 📈" if results['prediction'] == 1 else "DOWN 📉"
+            st.metric("Predicted Trend", trend)
+        else:
+            st.metric("Predicted Trend", "---")
+            
     with col3:
-        st.metric("Model Accuracy", "---")
+        if results:
+            st.metric("Model Accuracy", f"{results['accuracy']:.2%}")
+        else:
+            st.metric("Model Accuracy", "---")
+            
     with col4:
-        st.metric("Confidence", "---")
+        if results:
+            confidence_score = results['confidence'][1] if results['prediction'] == 1 else results['confidence'][0]
+            st.metric("Confidence", f"{confidence_score:.2%}")
+        else:
+            st.metric("Confidence", "---")
 
     st.divider()
 
@@ -141,61 +172,61 @@ else:
             fig_volat = px.line(data, x=data.index, y='Volatility', title="Rolling Volatility (20-Day)")
             st.plotly_chart(fig_volat, use_container_width=True)
 
-    # --- PREDICTION LOGIC ---
-    if predict_btn:
-        with st.spinner("Training Model..."):
-            results = train_and_predict(data)
+    # --- PREDICTION LOGIC & RESULTS ---
+    if st.session_state.prediction_results:
+        results = st.session_state.prediction_results
+        
+        st.markdown("---")
+        st.subheader("🎯 Prediction Analytics")
+        
+        res_col1, res_col2, res_col3 = st.columns(3)
+        
+        trend = "UP 📈" if results['prediction'] == 1 else "DOWN 📉"
+        color = "green" if results['prediction'] == 1 else "red"
+        
+        with res_col1:
+            st.markdown(f"### Next Day Trend: <span style='color:{color}'>{trend}</span>", unsafe_allow_html=True)
+            confidence_score = results['confidence'][1] if results['prediction'] == 1 else results['confidence'][0]
+            st.write(f"**Confidence:** {confidence_score:.2%}")
             
-            # Update KPI cards using streamlit containers (redrawing the metrics)
-            st.markdown("---")
-            st.subheader("🎯 Prediction Results")
+        with res_col2:
+            st.write(f"**Model Accuracy:** {results['accuracy']:.2%}")
+            st.write(f"**Precision:** {results['precision']:.2%}")
+            st.write(f"**Recall:** {results['recall']:.2%}")
             
-            res_col1, res_col2, res_col3 = st.columns(3)
-            
-            trend = "UP 📈" if results['prediction'] == 1 else "DOWN 📉"
-            color = "green" if results['prediction'] == 1 else "red"
-            
-            with res_col1:
-                st.markdown(f"### Next Day Trend: <span style='color:{color}'>{trend}</span>", unsafe_allow_html=True)
-                confidence_score = results['confidence'][1] if results['prediction'] == 1 else results['confidence'][0]
-                st.write(f"**Confidence:** {confidence_score:.2%}")
-                
-            with res_col2:
-                st.write(f"**Model Accuracy:** {results['accuracy']:.2%}")
-                st.write(f"**Trained on:** {len(data) - results['test_size']} samples")
-                st.write(f"**Tested on:** {results['test_size']} samples")
-                
-            with res_col3:
-                signal = "BUY" if results['prediction'] == 1 and confidence_score > 0.55 else "SELL" if results['prediction'] == 0 and confidence_score > 0.55 else "NEUTRAL"
-                st.markdown(f"### Trade Signal: **{signal}**")
+        with res_col3:
+            st.write(f"**Trained on:** {len(data) - results['test_size']} samples")
+            st.write(f"**Tested on:** {results['test_size']} samples")
+            signal = "BUY" if results['prediction'] == 1 and confidence_score > 0.55 else "SELL" if results['prediction'] == 0 and confidence_score > 0.55 else "NEUTRAL"
+            st.markdown(f"### Trade Signal: **{signal}**")
 
-            # Analytical Visuals
-            st.divider()
-            col_a1, col_a2 = st.columns(2)
-            
-            with col_a1:
-                st.write("#### 📊 Feature Importance")
-                fig_imp = px.bar(
-                    results['feature_importance'], 
-                    orientation='h', 
-                    labels={'value': 'Importance Score', 'index': 'Feature'},
-                    color_discrete_sequence=['teal']
-                )
-                fig_imp.update_layout(showlegend=False, height=400)
-                st.plotly_chart(fig_imp, use_container_width=True)
-                st.caption("This graph shows which indicators influenced the model's decision the most.")
+        # Analytical Visuals
+        st.divider()
+        col_a1, col_a2 = st.columns(2)
+        
+        with col_a1:
+            st.write("#### 📊 Feature Importance")
+            fig_imp = px.bar(
+                results['feature_importance'], 
+                orientation='h', 
+                labels={'value': 'Importance Score', 'index': 'Feature'},
+                color_discrete_sequence=['teal']
+            )
+            fig_imp.update_layout(showlegend=False, height=400)
+            st.plotly_chart(fig_imp, width="stretch")
+            st.caption("This graph shows which indicators influenced the model's decision the most.")
 
-            with col_a2:
-                st.write("#### 💡 Automated Insights")
-                insights = get_insights(data)
-                for insight in insights:
-                    st.write(f"- {insight}")
-                
-                # Add a prediction insight
-                if results['prediction'] == 1:
-                    st.success(f"The model identifies bullish patterns with {confidence_score:.1%} confidence.")
-                else:
-                    st.error(f"The model identifies bearish patterns with {confidence_score:.1%} confidence.")
+        with col_a2:
+            st.write("#### 💡 Automated Insights")
+            insights = get_insights(data)
+            for insight in insights:
+                st.write(f"- {insight}")
+            
+            # Add a prediction insight
+            if results['prediction'] == 1:
+                st.success(f"The model identifies bullish patterns with {confidence_score:.1%} confidence.")
+            else:
+                st.error(f"The model identifies bearish patterns with {confidence_score:.1%} confidence.")
 
     # --- FOOTER ---
     st.divider()
